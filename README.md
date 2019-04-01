@@ -6,7 +6,7 @@ Following description is in Czech-only since the analysis concerns czech data, s
 Tato analýza navazuje na [článek](https://www.irozhlas.cz/zpravy-domov/mapa-veznu_1903280600_pek?latlng=49.82127350693801|15.480000000000018|6.2427788541597335) z irozhlas.cz. Namísto percentuálního vyjádření
 počtu občanů každé z obcí percentuálně tato analýza používá [hierarchický bayesovský
 model](https://en.wikipedia.org/wiki/Bayesian_hierarchical_modeling) v prostředí 
-[Stan](https://mc-stan.org/). Jak ukážeme níže, analýza založená na procentech 
+[Stan](https://mc-stan.org/). Jak ukážeme, analýza založená na procentech 
 může být velmi citlivá na statistický šum. 
 Bayesovský model je naopak robustní neboť reprezentuje data pomocí parametrů dvou kategorií:
 lokální a globální. Lokální parametry reprezentují každou obec
