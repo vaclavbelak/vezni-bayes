@@ -1,0 +1,122 @@
+---
+title: "Analýza počtu uvěznených občanů obcí pomocí hierarchického beta-binomiálního modelu"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+Tato analýza navazuje na [článek](https://www.irozhlas.cz/zpravy-domov/mapa-veznu_1903280600_pek?latlng=49.82127350693801|15.480000000000018|6.2427788541597335) z irozhlas.cz. Namísto percentuálního vyjádření
+počtu občanů každé z obcí percentuálně tato analýza používá [hierarchický bayesovský
+model](https://en.wikipedia.org/wiki/Bayesian_hierarchical_modeling) v prostředí 
+[Stan](https://mc-stan.org/). Jak ukážeme níže, analýza založená na procentech 
+může být velmi citlivá na statistický šum. 
+Bayesovský model je naopak robustní neboť reprezentuje data pomocí parametrů dvou kategorií:
+lokální a globální. Lokální parametry reprezentují každou obec
+pravděpodobností, že náhodně vybraný občan dané obce je ve vězení. Všechny obce jsou
+pak ještě reprezentovány globálním parametrem, který lze interpretovat jako pravděpodobnost, že
+náhodně vybraný občan z náhodně vybrané obce je ve vězení. Máme tak dva typy parametrů:
+globální a lokální pro každou obci. Pro obce s malým počtem obyvatel bude sílit role 
+globálního parametru, protože nemáme dost dat. Pro obce s dostatečným počtem lidí
+pak bude sílit role lokálního parametru. Model tak automaticky a elegantně využívá
+všechna dostupná data a je robustní.
+
+# Příprava dat
+```{r}
+library(tidyverse)
+library(readxl)
+
+pocob <- read_excel('../data/pocet_obyvatel_obce.xlsx', skip=6, 
+                    col_names = c("okres_kod", "icob", "obec", 
+                                  "pocobyv", "muzi", "zeny", 
+                                  "prum_vek", "prum_vek_muzi", 
+                                  "prum_vek_zeny")) %>%
+  mutate(icob = as.numeric(icob)) %>%
+  select(icob, obec)
+pocvez <- read_csv('../data/pocvez_okresy.csv') %>%
+  inner_join(pocob, by = 'icob')
+pocvez
+```
+# Hierarchický bayesovský beta-bernoulli model
+```{r}
+library(rstan)
+options(mc.cores = 3)
+
+fit_hier <- stan("hier.stan", data=list(N=length(unique(pocvez$icob)),
+                                        K=pocvez$pocobyv,
+                                        y=pocvez$veznu),
+                  chains=3, seed=25, iter = 2000, thin = 1)
+```
+```
+
+# Analýza výsledků z modelu
+Theta jsou parametry modelu vyjadřujicí pravděpodobnost pro každou obec, že náhodně
+vybraný její občan je ve vězení. Vezmeme vždy 5, 50, 95-ti procentní percentil pro následující
+analýzu. Parametr `prob_diff` vyjadřuje rozdíl mezi theta a populačním parametrem phi,
+který lze interpretovat jako pravděpodobnost, že náhodně vybraný občan z náhodně 
+vybrané obce je ve vězení.
+
+Analýzou `prob_diff` tak můžeme najít obce, které mají výrazně vyšší či nižší 
+podíl svých občanů vě vězení oproti celostátní tendencí vyjádřenou parametrem phi.
+Bayesovská inference nám dává kompletní aposteriorní distribuci těchto parametrů,
+takže si můžeme zvolit libovolnou hranici, kterou budeme považovat za významnou.
+
+V následující analýze volím 95% spolehlivost, že daná obec má vyšší nebo nižší
+pravděpobnost výskytu svých občanů ve vězení oproti "celostátnímu průměru" (vyjádřenou phi).
+U takovýchobcích v následující analýze řekneme, že mají "výrazně nižší/vyšší podíl vězňů".
+```{r}
+pocvez$prob_05 <- summary(fit_hier, 'theta', 0.05)$summary[, '5%']
+pocvez$prob_50 <- summary(fit_hier, 'theta', 0.5)$summary[, '50%']
+pocvez$prob_95 <- summary(fit_hier, 'theta', 0.95)$summary[, '95%']
+pocvez$prob_diff_05 <- summary(fit_hier, 'prob_diff', .05)$summary[, '5%']
+pocvez$prob_diff_50 <- summary(fit_hier, 'prob_diff', .5)$summary[, '50%']
+pocvez$prob_diff_95 <- summary(fit_hier, 'prob_diff', .95)$summary[, '95%']
+
+summary(fit_hier, c('phi', 'kappa'))$summary
+```
+## Okresy s nějvětším počtem obcí, které mají výrazně vyšší podíl vězňů
+```{r}
+pocvez %>%
+  group_by(okres) %>%
+  summarise(sigcount = sum(prob_diff_05 > 0)) %>%
+  arrange(desc(sigcount))
+```
+## Okresy s největším počtem obcí, které mají výrazně nižší podíl věznů
+```{r}
+pocvez %>%
+  group_by(okres) %>%
+  summarise(sigcount = sum(prob_diff_95 < 0)) %>%
+  arrange(desc(sigcount))
+```
+## Obce s největším procentem svých občanů ve vězení
+Všimněte si, že tomuto pořadí dominují obce s malým počtem obyvatel, u kterých
+i pár občanů ve vězení vyústí ve vysoké procento. Jedná se tedy spíše o statistický
+šum než o indikaci vysoké kriminaliti v obci.
+```{r}
+pocvez %>%
+  select(obec, okres, pct, pocobyv, prob_50, prob_diff_05) %>%
+  arrange(desc(pct))
+```
+## Obce s nejvýrazněji vyšším počtem občanů ve vězení
+Tento seznam už dává více intuitivní smysl. Je na první pohled vidět mnoho obcí,
+známých vysokou kriminalitou.
+```{r}
+pocvez %>%
+  select(obec, okres, pct, pocobyv, prob_50, prob_diff_05) %>%
+  arrange(desc(prob_diff_05))
+```
+## Obce s procentuálně nejmenším počtem obyvatel ve vězení
+Tak jako v předešlém případě, tomuto seznamu dominují obce s malým počtem obyvatel,
+u kterých lze pochybovat o statistické průkaznosti. Nelze tak například věrohodně
+tvrdit, že jsou tyto obce výrazně bezpečnější, než jiné.
+```{r}
+pocvez %>%
+  select(obec, okres, pct, pocobyv, prob_50, prob_diff_95) %>%
+  arrange(pct)
+```
+## Obce s výrazně nišším počtem občanů ve vězení
+V následujícím seznamu lze vidět mnoho obcí, které, vzhledem ke své velikosti, 
+mají statistiky výrazně menzí počet obyvatel ve vězení.
+```{r}
+pocvez %>%
+  select(obec, okres, pct, pocobyv, prob_50, prob_diff_95) %>%
+  arrange(prob_diff_95)
+```
