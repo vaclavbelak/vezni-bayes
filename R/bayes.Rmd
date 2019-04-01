@@ -45,8 +45,6 @@ fit_hier <- stan("hier.stan", data=list(N=length(unique(pocvez$icob)),
                                         y=pocvez$veznu),
                   chains=3, seed=25, iter = 2000, thin = 1)
 ```
-```
-
 # Analýza výsledků z modelu
 Theta jsou parametry modelu vyjadřujicí pravděpodobnost pro každou obec, že náhodně
 vybraný její občan je ve vězení. Vezmeme vždy 5, 50, 95-ti procentní percentil pro následující
@@ -119,4 +117,8 @@ mají statistiky výrazně menzí počet obyvatel ve vězení.
 pocvez %>%
   select(obec, okres, pct, pocobyv, prob_50, prob_diff_95) %>%
   arrange(prob_diff_95)
+```
+## Ulož data
+```{r}
+write_csv(pocvez, '../data/results.csv')
 ```
